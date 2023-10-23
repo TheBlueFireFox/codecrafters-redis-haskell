@@ -7,8 +7,8 @@ import Data.ByteString qualified as BB
 import Data.ByteString.Char8 qualified as BBC
 import Data.ByteString.Lazy qualified as BL
 import Data.ByteString.Lazy.Char8 qualified as BLC
-import Data.Text.Lazy.Encoding as TE
 import Data.Text.Lazy as T
+import Data.Text.Lazy.Encoding qualified as TE
 import Network.Simple.TCP qualified as Tcp
 import Process qualified
 
@@ -24,6 +24,11 @@ recvAll sock = inner mempty
         | otherwise = inner (acc <> BL.fromStrict d)
 
 pp = Process.process . T.toLower
+
+handler (Left err) = error ("An error occured " ++ T.unpack err)
+handler (Right p) = TE.encodeUtf8 p
+
+process = BB.toStrict . handler . Process.process . TE.decodeASCII
 
 main :: IO ()
 main = do
@@ -46,8 +51,10 @@ main = do
     Tcp.serve Tcp.HostAny port $ \(socket, address) -> do
         BLC.putStrLn $ "successfully connected client: " <> BLC.pack (show address) <> "."
         req <- recvAll socket
+        BLC.putStrLn "Request"
         BLC.putStrLn req
-        let text = TE.decodeASCII req
-        let res = Process.process text
+        BLC.putStrLn "\nResponse"
+        let res = process req
         print res
+        Tcp.send socket res
         Tcp.closeSock socket
