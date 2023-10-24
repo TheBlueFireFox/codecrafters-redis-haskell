@@ -11,6 +11,17 @@ version:             0.1.0.0
 license:             BSD3
 language:            GHC2021
 
+ghc-options:
+  - -Wall
+  - -Wcompat
+  - -Widentities
+  - -Wincomplete-record-updates
+  - -Wincomplete-uni-patterns
+  - -Wmissing-export-lists
+  - -Wmissing-home-modules
+  - -Wpartial-fields
+  - -Wredundant-constraints
+
 dependencies:
 - base >= 4.7 && < 5
 - network-simple  # establish a simple TCP network

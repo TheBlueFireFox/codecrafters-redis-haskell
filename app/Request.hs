@@ -18,11 +18,16 @@ data Request = Request
 parsePing :: TE.Text -> Request
 parsePing _ = Request{command = PING, payload = Nothing}
 
+endOfLine :: String
+endOfLine = "\r\n"
+
+-- * 1\r\n$4\r\nping\r\n
+
 parse :: TE.Text -> Either TE.Text Request
-parse str =
-    if (not . null) (TES.indices "ping" (TE.toLower str))
-        then Right $ parsePing str
-        else Left $ "unsupported : " <> str
+parse x =
+    if (not . null) (TES.indices "ping" (TE.toLower x))
+        then Right $ parsePing x
+        else Left $ "unsupported command <" <> TE.replace (TE.pack "\r\n") (TE.pack "\\r\\n") x <> ">"
 
 -- case head w of
 --     "PING" -> Right $ parsePing str
