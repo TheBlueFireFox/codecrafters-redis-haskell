@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Request (Request (..), parse) where
+module Request (Request (..), parse, Key, Value) where
 
 import Text.Printf (printf)
 
@@ -9,9 +9,14 @@ import Data.Text.Lazy.Builder qualified as TLB
 
 import ParseRESP qualified as Par
 
+type Key = Par.RESPDataTypes
+type Value = Par.RESPDataTypes
+
 data Request
     = PING (Maybe Par.RESPDataTypes)
     | ECHO Par.RESPDataTypes
+    | SET Key Value
+    | GET Key
     deriving (Show)
 
 type Error = Par.RESPDataTypes
@@ -45,11 +50,29 @@ parseEcho payload = case payload of
     [_] -> Left $ handleError "ERR: unknown data format"
     v -> Left $ handleErrorNumArgs (length v) 1
 
+parseSet :: [Par.RESPDataTypes] -> Either Error Request
+parseSet payload = case payload of
+    [a@(Par.BulkString _), b] -> Right $ SET a b
+    [a@(Par.SimpleString _), b] -> Right $ SET a b
+    [_, _] -> Left $ handleError "ERR: unknown data format"
+    v -> Left $ handleErrorNumArgs (length v) 2
+
+parseGet :: [Par.RESPDataTypes] -> Either Error Request
+parseGet payload = case payload of
+    [a@(Par.BulkString _)] -> Right $ GET a
+    [a@(Par.SimpleString _)] -> Right $ GET a
+    [_] -> Left $ handleError "ERR: unknown data format"
+    v -> Left $ handleErrorNumArgs (length v) 1
+
 processCmdHelper :: TL.Text -> [Par.RESPDataTypes] -> Either Error Request
 processCmdHelper com respPayload = case TL.toUpper com of
-    "PING" -> parsePing $ tail respPayload
-    "ECHO" -> parseEcho $ tail respPayload
+    "PING" -> handler parsePing
+    "ECHO" -> handler parseEcho
+    "SET" -> handler parseSet
+    "GET" -> handler parseGet
     _ -> Left $ handleError "Unknown command"
+  where
+    handler p = p $ tail respPayload
 
 -- * 1\r\n$4\r\nping\r\n
 processCmd :: ([Par.RedisDataTypes], [Par.RESPDataTypes]) -> Either Error Request

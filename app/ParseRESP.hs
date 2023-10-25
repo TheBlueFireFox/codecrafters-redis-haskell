@@ -17,6 +17,7 @@ data RedisDataTypes
     | RError TL.Text
     | RInteger Int64
     | RArray [RedisDataTypes]
+    | RNull
     deriving (Show)
 
 fromRESPDataTypes :: RESPDataTypes -> RedisDataTypes
@@ -26,6 +27,7 @@ fromRESPDataTypes dt = case dt of
     Integers v -> RInteger v
     BulkString v -> RString v
     Arrays x -> RArray $ map fromRESPDataTypes x
+    Nulls -> RNull
 
 {-
 -    Simple Strings   RESP2   Simple      +
@@ -42,7 +44,8 @@ data RESPDataTypes
     | Integers Int64
     | BulkString TL.Text
     | Arrays [RESPDataTypes]
-    deriving (Show)
+    | Nulls
+    deriving (Show, Ord, Eq)
 
 sep :: BLC.ByteString
 sep = "\r\n"
@@ -92,6 +95,9 @@ parseArray res = do
             (curr, resStr) <- parseDataType currStr
             inner (i - 1) (curr : acc) resStr
 
+parseNull :: BLC.ByteString -> Maybe (RESPDataTypes, BLC.ByteString)
+parseNull res = (Nulls,) <$> parseSeparator res
+
 -- safety we know that we can use fromIntegral here safely
 -- as the the redis spec define it so
 parseDigits :: BLC.ByteString -> Maybe (Int64, BLC.ByteString)
@@ -118,6 +124,7 @@ parseDataType input = do
         ':' -> parseIntegers res
         '$' -> parseBulkString res
         '*' -> parseArray res
+        '_' -> parseNull res
         _ -> Nothing
 
 {-
@@ -136,6 +143,7 @@ serialize input = case input of
     Integers v -> ":" <> int v <> sep
     BulkString v -> "$" <> int (TL.length v) <> sep <> enc v <> sep
     Arrays v -> "*" <> int (toEnum (length v)) <> sep <> mconcat (map serialize v)
+    Nulls -> "_" <> sep
   where
     enc = TE.encodeUtf8
 
