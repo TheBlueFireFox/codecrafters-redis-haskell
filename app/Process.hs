@@ -32,7 +32,7 @@ handleEcho payload = case payload of
     _ -> handleError "ERR: unknown data format"
 
 returnOk :: Response
-returnOk = ResPar.SimpleString "Ok"
+returnOk = ResPar.SimpleString "OK"
 
 handleSet :: DB -> ResPar.RESPDataTypes -> ResPar.RESPDataTypes -> IO Response
 handleSet db key value = do
