@@ -25,12 +25,8 @@ recvAll sock = inner mempty
         | BB.length d < block = pure $ pure $ acc <> BL.fromStrict d
         | otherwise = inner (acc <> BL.fromStrict d)
 
-handler :: Either T.Text T.Text -> BLC.ByteString
-handler (Left err) = "-ERR: " <> TE.encodeUtf8 err <> "\r\n"
-handler (Right p) = TE.encodeUtf8 p
-
 process :: BLC.ByteString -> BLC.ByteString
-process = handler . Process.process . TE.decodeASCII
+process = Process.process
 
 run :: (Show t) => Tcp.Socket -> t -> IO ()
 run socket address = do
