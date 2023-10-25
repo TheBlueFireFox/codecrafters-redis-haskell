@@ -1,46 +1,65 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Request (Request (..), Command (..), parse) where
+module Request (Request (..), parse) where
 
-import Data.String (IsString)
+import Text.Printf (printf)
+
 import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.Builder qualified as TLB
+
 import ParseRESP qualified as Par
 
-data Command
-    = PING
-    | ECHO
+data Request
+    = PING (Maybe Par.RESPDataTypes)
+    | ECHO Par.RESPDataTypes
     deriving (Show)
 
-data Request = Request
-    { command :: Command
-    , payload :: Maybe Par.RESPDataTypes
-    }
-    deriving (Show)
+type Error = Par.RESPDataTypes
 
-parsePing :: [Par.RESPDataTypes] -> Request
-parsePing [] = Request{command = PING, payload = Nothing}
-parsePing [payload] = Request{command = PING, payload = Just payload}
-parsePing x = Request{command = PING, payload = Just $ Par.Arrays x}
+handleError :: TL.Text -> Error
+handleError = Par.SimpleError
 
-parseEcho :: [Par.RESPDataTypes] -> Request
-parseEcho [] = Request{command = ECHO, payload = Nothing}
-parseEcho payload = Request{command = ECHO, payload = Just $ Par.Arrays payload}
+strToTeHelper :: String -> TL.Text
+strToTeHelper = TLB.toLazyText . TLB.fromString
 
-processCmdHelper :: (IsString a) => TL.Text -> [Par.RESPDataTypes] -> Either a Request
+handleErrorNumArgsRange :: Int -> (Int, Int) -> Error
+handleErrorNumArgsRange given (mi, ma)
+    | mi == ma = handleError $ strToTeHelper $ printf "wrong number of arguments (given %d, expected %d)" given mi
+    | otherwise = handleError $ strToTeHelper $ printf "wrong number of arguments (given %d, expected in range %d - %d)" given mi ma
+
+handleErrorNumArgs :: Int -> Int -> Error
+handleErrorNumArgs given expected = handleErrorNumArgsRange given (expected, expected)
+
+parsePing :: [Par.RESPDataTypes] -> Either Error Request
+parsePing input = case input of
+    [] -> Right $ PING Nothing
+    [a@(Par.BulkString _)] -> Right $ PING $ Just a
+    [a@(Par.SimpleString _)] -> Right $ PING $ Just a
+    [_] -> Left $ handleError "Unsupported Type"
+    v -> Left $ handleErrorNumArgsRange (length v) (0, 1)
+
+parseEcho :: [Par.RESPDataTypes] -> Either Error Request
+parseEcho payload = case payload of
+    [a@(Par.BulkString _)] -> Right $ ECHO a
+    [a@(Par.SimpleString _)] -> Right $ ECHO a
+    [_] -> Left $ handleError "ERR: unknown data format"
+    v -> Left $ handleErrorNumArgs (length v) 1
+
+processCmdHelper :: TL.Text -> [Par.RESPDataTypes] -> Either Error Request
 processCmdHelper com respPayload = case TL.toUpper com of
-    "PING" -> Right $ parsePing $ tail respPayload
-    "ECHO" -> Right $ parseEcho $ tail respPayload
-    _ -> Left "Unknown command"
+    "PING" -> parsePing $ tail respPayload
+    "ECHO" -> parseEcho $ tail respPayload
+    _ -> Left $ handleError "Unknown command"
 
 -- * 1\r\n$4\r\nping\r\n
-processCmd :: (IsString a) => ([Par.RedisDataTypes], [Par.RESPDataTypes]) -> Either a Request
+processCmd :: ([Par.RedisDataTypes], [Par.RESPDataTypes]) -> Either Error Request
 processCmd (red, resp) = case red of
-    [] -> Left "Empty command"
     (Par.RString com : _) -> processCmdHelper com resp
-    _ -> Left "Unexpect redis type"
+    [] -> Left $ handleError "Empty command"
+    _ -> Left $ handleError "Unexpect redis type"
 
-parse :: (Par.RedisDataTypes, Par.RESPDataTypes) -> Either TL.Text Request
+parse :: (Par.RedisDataTypes, Par.RESPDataTypes) -> Either Error Request
 parse (red, resp) = case (red, resp) of
     (Par.RString _, _) -> processCmd ([red], [resp])
     (Par.RArray l, Par.Arrays r) -> processCmd (l, r)
-    _ -> Left "No Command Found"
+    _ -> Left $ handleError "No Command Found"
