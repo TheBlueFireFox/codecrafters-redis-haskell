@@ -27,7 +27,8 @@ fromRESPDataTypes dt = case dt of
     Integers v -> RInteger v
     BulkString v -> RString v
     Arrays x -> RArray $ map fromRESPDataTypes x
-    Nulls -> RNull
+    NullArrays -> RNull
+    NullString -> RNull
 
 {-
 -    Simple Strings   RESP2   Simple      +
@@ -39,12 +40,13 @@ fromRESPDataTypes dt = case dt of
 -    *2\r\n$4\r\nECHO\r\n$3\r\nhey\r\n
 -}
 data RESPDataTypes
-    = SimpleString TL.Text
-    | SimpleError TL.Text
-    | Integers Int64
+    = SimpleError TL.Text
+    | SimpleString TL.Text
     | BulkString TL.Text
+    | NullString
+    | Integers Int64
     | Arrays [RESPDataTypes]
-    | Nulls
+    | NullArrays
     deriving (Show, Ord, Eq)
 
 sep :: BLC.ByteString
@@ -75,10 +77,15 @@ parseBulkString :: BLC.ByteString -> Maybe (RESPDataTypes, BLC.ByteString)
 parseBulkString res = do
     (size, noDig) <- parseDigits res
     justStr <- parseSeparator noDig
-    let (str, restWithSep) = BL.splitAt size justStr
-    noSep <- parseSeparator restWithSep
-    let endStr = TE.decodeUtf8 str
-    pure (BulkString endStr, noSep)
+    if size == (-1)
+        then pure (NullString, justStr)
+        else process size justStr
+  where
+    process size justStr = do
+        let (str, restWithSep) = BL.splitAt size justStr
+        noSep <- parseSeparator restWithSep
+        let endStr = TE.decodeUtf8 str
+        pure (BulkString endStr, noSep)
 
 {-
  -  *2\r\n$5\r\nhello\r\n$5\r\nworld\r\n
@@ -87,16 +94,15 @@ parseArray :: BLC.ByteString -> Maybe (RESPDataTypes, BLC.ByteString)
 parseArray res = do
     (i, noDig) <- parseDigits res
     justStr <- parseSeparator noDig
-    first Arrays <$> inner i [] justStr
+    if i == (-1)
+        then pure (NullArrays, justStr)
+        else first Arrays <$> inner i [] justStr
   where
     inner i acc currStr
         | i == 0 = pure (reverse acc, currStr)
         | otherwise = do
             (curr, resStr) <- parseDataType currStr
             inner (i - 1) (curr : acc) resStr
-
-parseNull :: BLC.ByteString -> Maybe (RESPDataTypes, BLC.ByteString)
-parseNull res = (Nulls,) <$> parseSeparator res
 
 -- safety we know that we can use fromIntegral here safely
 -- as the the redis spec define it so
@@ -124,7 +130,6 @@ parseDataType input = do
         ':' -> parseIntegers res
         '$' -> parseBulkString res
         '*' -> parseArray res
-        '_' -> parseNull res
         _ -> Nothing
 
 {-
@@ -143,7 +148,8 @@ serialize input = case input of
     Integers v -> ":" <> int v <> sep
     BulkString v -> "$" <> int (TL.length v) <> sep <> enc v <> sep
     Arrays v -> "*" <> int (toEnum (length v)) <> sep <> mconcat (map serialize v)
-    Nulls -> "_" <> sep
+    NullArrays -> "$-1" <> sep
+    NullString -> "$-1" <> sep
   where
     enc = TE.encodeUtf8
 

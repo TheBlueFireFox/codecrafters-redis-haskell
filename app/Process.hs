@@ -6,6 +6,7 @@ import ConcurrentMemory qualified as CM
 import Data.ByteString.Lazy qualified as BL
 import Data.Maybe (fromMaybe)
 import Data.Text.Lazy qualified as TL
+import Data.Word (Word64)
 import ParseRESP qualified as ResPar
 import Request qualified as Req
 
@@ -34,21 +35,23 @@ handleEcho payload = case payload of
 returnOk :: Response
 returnOk = ResPar.SimpleString "OK"
 
-handleSet :: DB -> ResPar.RESPDataTypes -> ResPar.RESPDataTypes -> IO Response
-handleSet db key value = do
-    CM.insert key value db
+handleSet :: DB -> ResPar.RESPDataTypes -> ResPar.RESPDataTypes -> Maybe Word64 -> IO Response
+handleSet db key value expiry = do
+    case expiry of
+        Nothing -> CM.insert key value db
+        Just un -> CM.insertWith key value un db
     pure returnOk
 
 handleGet :: DB -> ResPar.RESPDataTypes -> IO Response
 handleGet db key = do
     mVal <- CM.lookup key db
-    pure $ fromMaybe ResPar.Nulls mVal
+    pure $ fromMaybe ResPar.NullString mVal
 
 handleCommands :: DB -> Request -> IO Response
 handleCommands db req = case req of
     Req.PING payload -> pure $ handlePing payload
     Req.ECHO payload -> pure $ handleEcho payload
-    Req.SET key value -> handleSet db key value
+    Req.SET key value expiry -> handleSet db key value expiry
     Req.GET key -> handleGet db key
 
 processHelper :: DB -> BL.ByteString -> IO Response
