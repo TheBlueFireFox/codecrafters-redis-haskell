@@ -10,7 +10,7 @@ import Data.Text.Lazy.Read qualified as TR
 
 import Control.Arrow (left, right)
 import Data.Word (Word64)
-import ParseRESP qualified as Par
+import Parse.RESP qualified as Par
 
 type Key = Par.RESPDataTypes
 type Value = Par.RESPDataTypes

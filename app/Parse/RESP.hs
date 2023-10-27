@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module ParseRESP (serialize, deserialize, RESPDataTypes (..), fromRESPDataTypes, RedisDataTypes (..)) where
+module Parse.RESP (serialize, deserialize, RESPDataTypes (..), fromRESPDataTypes, RedisDataTypes (..)) where
 
 import Control.Arrow (Arrow (first))
 import Data.Int (Int64)

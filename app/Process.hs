@@ -8,63 +8,62 @@ import Data.ByteString.Lazy qualified as BL
 import Data.Maybe (fromMaybe)
 import Data.Text.Lazy qualified as TL
 import Data.Word (Word64)
-import ParseRESP qualified as ResPar
+import Parse.RESP qualified as RESP
 import Request qualified as Req
-import Text.Parsec qualified as TL
 
 type Data = (DB, Q.Options)
 
-type Key = ResPar.RESPDataTypes
-type Value = ResPar.RESPDataTypes
+type Key = RESP.RESPDataTypes
+type Value = RESP.RESPDataTypes
 type DB = CM.DB Key Value
 
 type Request = Req.Request
-type Response = ResPar.RESPDataTypes
+type Response = RESP.RESPDataTypes
 
 handleError :: TL.Text -> Response
-handleError = ResPar.SimpleError
+handleError = RESP.SimpleError
 
-handlePing :: Maybe ResPar.RESPDataTypes -> ResPar.RESPDataTypes
-handlePing (Just (ResPar.BulkString a)) = ResPar.BulkString a
-handlePing (Just (ResPar.SimpleString a)) = ResPar.SimpleString a
-handlePing Nothing = ResPar.SimpleString "PONG"
+handlePing :: Maybe RESP.RESPDataTypes -> RESP.RESPDataTypes
+handlePing (Just (RESP.BulkString a)) = RESP.BulkString a
+handlePing (Just (RESP.SimpleString a)) = RESP.SimpleString a
+handlePing Nothing = RESP.SimpleString "PONG"
 handlePing _ = handleError "Unsupported Type for <PING>"
 
-handleEcho :: ResPar.RESPDataTypes -> Response
+handleEcho :: RESP.RESPDataTypes -> Response
 handleEcho payload = case payload of
-    ResPar.BulkString _ -> payload
-    ResPar.SimpleString _ -> payload
+    RESP.BulkString _ -> payload
+    RESP.SimpleString _ -> payload
     _ -> handleError "ERR: unknown data format"
 
 returnOk :: Response
-returnOk = ResPar.SimpleString "OK"
+returnOk = RESP.SimpleString "OK"
 
-handleSet :: DB -> ResPar.RESPDataTypes -> ResPar.RESPDataTypes -> Maybe Word64 -> IO Response
+handleSet :: DB -> RESP.RESPDataTypes -> RESP.RESPDataTypes -> Maybe Word64 -> IO Response
 handleSet db key value expiry = do
     case expiry of
         Nothing -> CM.insert key value db
         Just un -> CM.insertWith key value un db
     pure returnOk
 
-handleGet :: DB -> ResPar.RESPDataTypes -> IO Response
+handleGet :: DB -> RESP.RESPDataTypes -> IO Response
 handleGet db key = do
     mVal <- CM.lookup key db
-    pure $ fromMaybe ResPar.NullString mVal
+    pure $ fromMaybe RESP.NullString mVal
 
-extractor :: ResPar.RESPDataTypes -> Either Response TL.Text
+extractor :: RESP.RESPDataTypes -> Either Response TL.Text
 extractor p = case p of
-    ResPar.BulkString v -> Right v
-    ResPar.SimpleString v -> Right v
+    RESP.BulkString v -> Right v
+    RESP.SimpleString v -> Right v
     _ -> Left $ handleError "Incorrect Type"
 
-handleConfigGet :: Q.Options -> [ResPar.RESPDataTypes] -> Response
-handleConfigGet opts payload = either id (ResPar.Arrays . concat) $ inner [] payload
+handleConfigGet :: Q.Options -> [RESP.RESPDataTypes] -> Response
+handleConfigGet opts payload = either id (RESP.Arrays . concat) $ inner [] payload
   where
     inner acc [] = Right acc
     inner acc (x : xs) = flip inner xs . (: acc) =<< p =<< extractor x
 
-    str = ResPar.BulkString
-    pro x = Right . maybe [ResPar.NullString] (\y -> [str x, str (TL.pack y)])
+    str = RESP.BulkString
+    pro x = Right . maybe [RESP.NullString] (\y -> [str x, str (TL.pack y)])
     p x = case TL.toUpper x of
         "DIR" -> pro x $ Q.optDir opts
         "DBFILENAME" -> pro x $ Q.optDbPath opts
@@ -79,9 +78,9 @@ handleCommands (db, opts) req = case req of
     Req.ConfigGet params -> pure $ handleConfigGet opts params
 
 processHelper :: Data -> BL.ByteString -> IO Response
-processHelper d = maybe (pure $ handleError "Unable to parse request") parse . ResPar.deserialize
+processHelper d = maybe (pure $ handleError "Unable to parse request") parse . RESP.deserialize
   where
-    parse parsable = either pure (handleCommands d) $ Req.parse (ResPar.fromRESPDataTypes parsable, parsable)
+    parse parsable = either pure (handleCommands d) $ Req.parse (RESP.fromRESPDataTypes parsable, parsable)
 
 process :: Data -> BL.ByteString -> IO BL.ByteString
-process d input = ResPar.serialize <$> processHelper d input
+process d input = RESP.serialize <$> processHelper d input
