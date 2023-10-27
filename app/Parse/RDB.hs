@@ -1,4 +1,21 @@
-module Parse.RDB where
+{-# LANGUAGE OverloadedStrings #-}
+
+module Parse.RDB (
+    RDB (..),
+    AuxField (..),
+    Db (..),
+    Key,
+    Value,
+    readFile,
+) where
+
+import Data.ByteString.Lazy qualified as BL
+import Data.ByteString.Lazy.Char8 qualified as BLC
+import Data.Int (Int32)
+import Data.Map.Strict qualified as M
+import Data.Word (Word64, Word8)
+import System.Directory qualified as Dir
+import Prelude hiding (readFile)
 
 {-
     00000000  52 45 44 49 53 30 30 31  30 fa 09 72 65 64 69 73  |REDIS0010..redis|
@@ -44,4 +61,79 @@ module Parse.RDB where
     FF                          ## End of RDB file indicator
     8-byte-checksum             ## CRC64 checksum of the entire file.
 -}
-todo = ""
+
+data RDB = RDB
+    { rdbVersionNr :: BL.ByteString
+    , auxField :: Maybe AuxField
+    , dbs :: [Db]
+    , fileCheckSum :: BL.ByteString
+    }
+    deriving (Show)
+
+data AuxField = AuxField
+    { redisVersion :: BL.ByteString
+    , redisBits :: BL.ByteString
+    , ctime :: BL.ByteString
+    , usedMem :: BL.ByteString
+    }
+    deriving (Show)
+
+data Db = DbSelector
+    { databaseNr :: Int32
+    , store :: KVStore
+    , expiryStore :: KVExpiryStore
+    }
+    deriving (Show)
+
+type Key = BL.ByteString
+type Value = BL.ByteString
+type KVStore = M.Map Key Value
+
+type ValueExpiry = (BL.ByteString, Maybe Word64)
+type KVExpiryStore = M.Map Key ValueExpiry
+
+data ValueTypes
+    = StringEncoding
+    | ListEncoding
+    | SetEncoding
+    | SortedEncoding
+    | HashEncoding
+    | ZipmapEncoding
+    | ZiplistEncoding
+    | IntsetEncoding
+    | SortedZipListEncoding
+    | HashmapZipListEncoding
+    | ListZipListEncoding
+    deriving (Show)
+
+toValueType :: Word8 -> Maybe ValueTypes
+toValueType v = case v of
+    0 -> Just StringEncoding
+    1 -> Just ListEncoding
+    2 -> Just SetEncoding
+    3 -> Just SortedEncoding
+    4 -> Just HashEncoding
+    9 -> Just ZipmapEncoding
+    10 -> Just ZiplistEncoding
+    11 -> Just IntsetEncoding
+    12 -> Just SortedZipListEncoding
+    13 -> Just HashmapZipListEncoding
+    14 -> Just ListZipListEncoding
+    _ -> Nothing
+
+checkRedisHeader :: BLC.ByteString -> Maybe BLC.ByteString
+checkRedisHeader file = if "REDIS" == BL.take 5 file
+    then Just $ BL.drop 5 file
+    else Nothing
+
+readFile :: FilePath -> IO (Maybe RDB)
+readFile filePath = do
+    b <- Dir.doesFileExist filePath
+    if not b
+        then pure Nothing
+        else Just . process <$> BL.readFile filePath
+  where
+    process file 
+
+todo :: a
+todo = error "todo"
