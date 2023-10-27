@@ -10,7 +10,7 @@ import Data.Text.Lazy qualified as TL
 import Data.Word (Word64)
 import ParseRESP qualified as ResPar
 import Request qualified as Req
-import qualified Text.Parsec as TL
+import Text.Parsec qualified as TL
 
 type Data = (DB, Q.Options)
 
@@ -58,14 +58,16 @@ extractor p = case p of
     _ -> Left $ handleError "Incorrect Type"
 
 handleConfigGet :: Q.Options -> [ResPar.RESPDataTypes] -> Response
-handleConfigGet opts payload = either id ResPar.Arrays $ inner [] payload
+handleConfigGet opts payload = either id (ResPar.Arrays . concat) $ inner [] payload
   where
     inner acc [] = Right acc
     inner acc (x : xs) = flip inner xs . (: acc) =<< p =<< extractor x
 
+    str = ResPar.BulkString
+    pro x = Right . maybe [ResPar.NullString] (\y -> [str x, str (TL.pack y)])
     p x = case TL.toUpper x of
-        "DIR" -> Right $ maybe ResPar.NullString (ResPar.BulkString . TL.pack) $ Q.optDir opts
-        "DBFILENAME" -> Right $ maybe ResPar.NullString (ResPar.BulkString . TL.pack) $ Q.optDbPath opts
+        "DIR" -> pro x $ Q.optDir opts
+        "DBFILENAME" -> pro x $ Q.optDbPath opts
         _ -> Left $ handleError "Unknown config key"
 
 handleCommands :: Data -> Request -> IO Response
