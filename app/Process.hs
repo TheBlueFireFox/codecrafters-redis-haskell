@@ -2,6 +2,7 @@
 
 module Process (process) where
 
+import Args qualified as Q
 import ConcurrentMemory qualified as CM
 import Data.ByteString.Lazy qualified as BL
 import Data.Maybe (fromMaybe)
@@ -9,6 +10,9 @@ import Data.Text.Lazy qualified as TL
 import Data.Word (Word64)
 import ParseRESP qualified as ResPar
 import Request qualified as Req
+import qualified Text.Parsec as TL
+
+type Data = (DB, Q.Options)
 
 type Key = ResPar.RESPDataTypes
 type Value = ResPar.RESPDataTypes
@@ -47,17 +51,35 @@ handleGet db key = do
     mVal <- CM.lookup key db
     pure $ fromMaybe ResPar.NullString mVal
 
-handleCommands :: DB -> Request -> IO Response
-handleCommands db req = case req of
-    Req.PING payload -> pure $ handlePing payload
-    Req.ECHO payload -> pure $ handleEcho payload
-    Req.SET key value expiry -> handleSet db key value expiry
-    Req.GET key -> handleGet db key
+extractor :: ResPar.RESPDataTypes -> Either Response TL.Text
+extractor p = case p of
+    ResPar.BulkString v -> Right v
+    ResPar.SimpleString v -> Right v
+    _ -> Left $ handleError "Incorrect Type"
 
-processHelper :: DB -> BL.ByteString -> IO Response
-processHelper db = maybe (pure $ handleError "Unable to parse request") parse . ResPar.deserialize
+handleConfigGet :: Q.Options -> [ResPar.RESPDataTypes] -> Response
+handleConfigGet opts payload = either id ResPar.Arrays $ inner [] payload
   where
-    parse parsable = either pure (handleCommands db) $ Req.parse (ResPar.fromRESPDataTypes parsable, parsable)
+    inner acc [] = Right acc
+    inner acc (x : xs) = flip inner xs . (: acc) =<< p =<< extractor x
 
-process :: DB -> BL.ByteString -> IO BL.ByteString
-process db input = ResPar.serialize <$> processHelper db input
+    p x = case TL.toUpper x of
+        "DIR" -> Right $ maybe ResPar.NullString (ResPar.BulkString . TL.pack) $ Q.optDir opts
+        "DBFILENAME" -> Right $ maybe ResPar.NullString (ResPar.BulkString . TL.pack) $ Q.optDbPath opts
+        _ -> Left $ handleError "Unknown config key"
+
+handleCommands :: Data -> Request -> IO Response
+handleCommands (db, opts) req = case req of
+    Req.Ping payload -> pure $ handlePing payload
+    Req.Echo payload -> pure $ handleEcho payload
+    Req.Set key value expiry -> handleSet db key value expiry
+    Req.Get key -> handleGet db key
+    Req.ConfigGet params -> pure $ handleConfigGet opts params
+
+processHelper :: Data -> BL.ByteString -> IO Response
+processHelper d = maybe (pure $ handleError "Unable to parse request") parse . ResPar.deserialize
+  where
+    parse parsable = either pure (handleCommands d) $ Req.parse (ResPar.fromRESPDataTypes parsable, parsable)
+
+process :: Data -> BL.ByteString -> IO BL.ByteString
+process d input = ResPar.serialize <$> processHelper d input

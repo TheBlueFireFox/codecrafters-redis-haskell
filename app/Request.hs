@@ -17,10 +17,11 @@ type Value = Par.RESPDataTypes
 type ExpireTimeMS = Maybe Word64
 
 data Request
-    = PING (Maybe Par.RESPDataTypes)
-    | ECHO Par.RESPDataTypes
-    | SET Key Value ExpireTimeMS
-    | GET Key
+    = Ping (Maybe Par.RESPDataTypes)
+    | Echo Par.RESPDataTypes
+    | Set Key Value ExpireTimeMS
+    | Get Key
+    | ConfigGet [Par.RESPDataTypes]
     deriving (Show)
 
 type Error = Par.RESPDataTypes
@@ -41,30 +42,31 @@ handleErrorNumArgs given expected = handleErrorNumArgsRange given (expected, exp
 
 parsePing :: [Par.RESPDataTypes] -> Either Error Request
 parsePing input = case input of
-    [] -> Right $ PING Nothing
-    [a@(Par.BulkString _)] -> Right $ PING $ Just a
-    [a@(Par.SimpleString _)] -> Right $ PING $ Just a
+    [] -> Right $ Ping Nothing
+    [a@(Par.BulkString _)] -> Right $ Ping $ Just a
+    [a@(Par.SimpleString _)] -> Right $ Ping $ Just a
     [_] -> Left $ handleError "Unsupported Type"
     v -> Left $ handleErrorNumArgsRange (length v) (0, 1)
 
 parseEcho :: [Par.RESPDataTypes] -> Either Error Request
 parseEcho payload = case payload of
-    [a@(Par.BulkString _)] -> Right $ ECHO a
-    [a@(Par.SimpleString _)] -> Right $ ECHO a
+    [a@(Par.BulkString _)] -> Right $ Echo a
+    [a@(Par.SimpleString _)] -> Right $ Echo a
     [_] -> Left $ handleError "ERR: unknown data format"
     v -> Left $ handleErrorNumArgs (length v) 1
 
+extractor :: Par.RESPDataTypes -> Either Error TL.Text
+extractor p = case p of
+    Par.BulkString v -> Right v
+    Par.SimpleString v -> Right v
+    _ -> Left $ handleError "Incorrect Type"
+
 parseSet :: [Par.RESPDataTypes] -> Either Error Request
 parseSet payload = case payload of
-    (a@(Par.BulkString _) : b : ex) -> SET a b <$> parseSetExpireHelper ex
-    (a@(Par.SimpleString _) : b : ex) -> SET a b <$> parseSetExpireHelper ex
+    (a@(Par.BulkString _) : b : ex) -> Set a b <$> parseSetExpireHelper ex
+    (a@(Par.SimpleString _) : b : ex) -> Set a b <$> parseSetExpireHelper ex
     v -> Left $ handleErrorNumArgs (length v) 2
   where
-    extractor p = case p of
-        Par.BulkString v -> Right v
-        Par.SimpleString v -> Right v
-        _ -> Left $ handleError "Incorrect Type"
-
     parseSetExpireHelper d = case d of
         [] -> Right Nothing
         [v, p] -> do
@@ -81,10 +83,29 @@ parseSet payload = case payload of
 
 parseGet :: [Par.RESPDataTypes] -> Either Error Request
 parseGet payload = case payload of
-    [a@(Par.BulkString _)] -> Right $ GET a
-    [a@(Par.SimpleString _)] -> Right $ GET a
+    [a@(Par.BulkString _)] -> Right $ Get a
+    [a@(Par.SimpleString _)] -> Right $ Get a
     [_] -> Left $ handleError "ERR: unknown data format"
     v -> Left $ handleErrorNumArgs (length v) 1
+
+parseConfigGet :: [Par.RESPDataTypes] -> Either Error Request
+parseConfigGet payload = p =<< inner [] payload
+  where
+    p [] = Left $ handleErrorNumArgs 0 1
+    p pp = Right $ ConfigGet pp
+    inner acc [] = Right acc
+    inner acc (x : xs) = case x of
+        a@(Par.BulkString _) -> inner (a : acc) xs
+        a@(Par.SimpleString _) -> inner (a : acc) xs
+        _ -> Left $ handleError "ERR: unknown data format"
+
+parseConfig :: [Par.RESPDataTypes] -> Either Error Request
+parseConfig [] = Left $ handleErrorNumArgs 0 1
+parseConfig (v : vs) = p =<< extractor v
+  where
+    p com = case TL.toUpper com of
+        "GET" -> parseConfigGet vs
+        _ -> Left $ handleError "Unknown command"
 
 -- * 1\r\n$4\r\nping\r\n
 processCmd :: ([Par.RedisDataTypes], [Par.RESPDataTypes]) -> Either Error Request
@@ -99,6 +120,7 @@ processCmd (red, resp) = case red of
         "ECHO" -> handler parseEcho
         "SET" -> handler parseSet
         "GET" -> handler parseGet
+        "CONFIG" -> handler parseConfig
         _ -> Left $ handleError "Unknown command"
 
 parse :: (Par.RedisDataTypes, Par.RESPDataTypes) -> Either Error Request
