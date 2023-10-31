@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Process (process) where
+module Process (process, DB) where
 
 import Args qualified as Q
 import ConcurrentMemory qualified as CM

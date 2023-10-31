@@ -1,29 +1,26 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Parse.RDB (
-    RDB (..),
-    AuxField (..),
-    Db (..),
-    Key,
-    Value,
-    readFile,
-) where
+module Parse.RDB (RDB (..), AuxField (..), Db (..), readFile) where
 
 import Control.Monad (unless)
 import Data.Bits (Bits (..), shiftL, (.&.))
-import Data.Int (Int32, Int64)
-import Data.Word (Word64, Word8)
+import Data.Int (Int64)
+import Data.Word (Word16, Word32, Word64, Word8)
 import Prelude hiding (readFile)
 
 import Control.Monad.Except qualified as E
 import Data.Binary.Get qualified as G
 import Data.ByteString.Lazy qualified as BL
 import Data.ByteString.Lazy.Char8 qualified as BLC
-import Data.Map.Strict qualified as M
-import Debug.Trace (trace)
 import System.Directory qualified as Dir
 
+import DB.DB qualified as DB
+
 type MyGet a = E.ExceptT BL.ByteString G.Get a
+
+type Key = BL.ByteString
+type Value = BL.ByteString
+type KVStore = DB.DB Key Value
 
 {-
     00000000  52 45 44 49 53 30 30 31  30 fa 09 72 65 64 69 73  |REDIS0010..redis|
@@ -87,18 +84,18 @@ data AuxField = AuxField
     deriving (Show)
 
 data Db = Db
-    { databaseNr :: Int32
+    { databaseNr :: Word64
+    , hashTableSize :: Word64
+    , hashExpireTableSize :: Word64
     , store :: KVStore
-    , expiryStore :: KVExpiryStore
     }
     deriving (Show)
 
-type Key = BL.ByteString
-type Value = BL.ByteString
-type KVStore = M.Map Key Value
-
-type ValueExpiry = (BL.ByteString, Maybe Word64)
-type KVExpiryStore = M.Map Key ValueExpiry
+data StringEncondings
+    = LenPrefixStr Int64
+    | IntAsStr Int64
+    | CompStr Int64 Int64
+    deriving (Show)
 
 data ValueTypes
     = StringEncoding
@@ -155,8 +152,26 @@ getOpcode = parseOpcode <$> getWord8
 getWord8 :: MyGet Word8
 getWord8 = E.lift G.getWord8
 
+getWord16 :: MyGet Word16
+getWord16 = E.lift G.getWord16be
+
+getWord32 :: MyGet Word32
+getWord32 = E.lift G.getWord32be
+
+getWord64 :: MyGet Word64
+getWord64 = E.lift G.getWord64be
+
 getByteString :: Int64 -> MyGet BL.ByteString
 getByteString = E.lift . G.getLazyByteString
+
+skipUntil :: (Monad (t G.Get), E.MonadTrans t) => (Word8 -> Bool) -> t G.Get (Maybe a)
+skipUntil f = do
+    v <- E.lift $ G.lookAhead G.getWord8
+    if f v
+        then do
+            _ <- E.lift G.getWord8
+            skipUntil f
+        else pure Nothing
 
 {-
     Bits 	How to parse
@@ -167,21 +182,83 @@ getByteString = E.lift . G.getLazyByteString
             May be used to store numbers or Strings, see String Encoding
 -}
 
-getVariableLenNr :: MyGet Int64
-getVariableLenNr = do
+getVariableLenNrHelper :: (Bits a, Num b1, Num t, Num a) => (t -> b2) -> (a -> b2) -> (b1 -> b2) -> (Word8 -> MyGet b2) -> MyGet b2
+getVariableLenNrHelper a b c d = do
     lRaw <- getWord8
-    let m = lRaw `shiftL` 6
-    let mRes = lRaw .&. complement (0b11 `shiftR` 6)
+    let m = lRaw `shiftR` 6
+    let mRes = lRaw .&. complement (0b11 `shiftL` 6)
     case m of
-        0b00 -> pure $ fromIntegral mRes
+        0b00 -> pure . a $ fromIntegral mRes
         0b01 -> do
             n <- getWord8
-            let nInt64 = fromIntegral n :: Int64
-                mResInt64 = fromIntegral mRes :: Int64
-            pure $ (mResInt64 `shiftL` 8) .|. nInt64
-        0b10 -> fromIntegral <$> E.lift G.getWord32be
-        0b11 -> todo
-        _ -> E.throwError $ "Impossible lenght detected... No clue how this case will ever be called. <" <> BLC.pack (show m) <> ">"
+            let nInt64 = fromIntegral n
+                mResInt64 = fromIntegral mRes
+            pure . b $ (mResInt64 `shiftL` 8) .|. nInt64
+        0b10 -> c . fromIntegral <$> getWord32
+        0b11 -> d mRes
+        _ -> E.throwError $ "Impossible lenght detected... No clue how this case will ever be called. <" <> BLC.pack (show m) <> "> -- <" <> BLC.pack (show lRaw) <> ">"
+
+getStrVariableLenNr :: MyGet StringEncondings
+getStrVariableLenNr = getVariableLenNrHelper LenPrefixStr LenPrefixStr LenPrefixStr t
+  where
+    t a = case a of
+        0 -> IntAsStr . fromIntegral <$> getWord8
+        1 -> IntAsStr . fromIntegral <$> getWord16
+        2 -> IntAsStr . fromIntegral <$> getWord32
+        3 -> CompStr <$> (fromIntegral <$> getVariableLenNr) <*> (fromIntegral <$> getVariableLenNr)
+        _ -> E.throwError $ "Unsupported string technology <" <> BLC.pack (show a) <> ">"
+
+getVariableLenNr :: MyGet Word64
+getVariableLenNr = getVariableLenNrHelper id id id (\_ -> E.throwError "Unsupported special encoding")
+
+getStringLenEncodedValue :: Int64 -> MyGet BLC.ByteString
+getStringLenEncodedValue = getByteString
+
+getStringEncodedValue :: MyGet BL.ByteString
+getStringEncodedValue = do
+    len <- getStrVariableLenNr
+    case len of
+        LenPrefixStr l -> getStringLenEncodedValue l
+        IntAsStr l -> getByteString l
+        CompStr _cl _dl -> E.throwError "No compressed string support currently"
+
+getEncodedValue :: ValueTypes -> MyGet BLC.ByteString
+getEncodedValue v = case v of
+    StringEncoding -> getStringEncodedValue
+    _ -> E.throwError $ "Unsupported encoding <" <> BLC.pack (show v) <> ">"
+
+getExpiryTime :: MyGet (Maybe Word64)
+getExpiryTime = do
+    expLimit <- E.lift $ G.lookAhead G.getWord8
+    case expLimit of
+        0xFD -> do
+            _ <- getWord8
+            Just . fromIntegral <$> getWord32
+        0xFC -> do
+            _ <- getWord8
+            Just <$> getWord64
+        _ -> pure Nothing
+
+getKeyValuePair :: MyGet (BL.ByteString, (BL.ByteString, Maybe Word64))
+getKeyValuePair = do
+    expTime <- getExpiryTime
+    vtRaw <- getWord8
+    vt <- maybe (E.throwError ("Unknown Value Type <" <> BLC.pack (show vtRaw) <> ">")) pure $ toValueType vtRaw
+    key <- getStringEncodedValue
+    value <- getEncodedValue vt
+    pure (key, (value, expTime))
+
+getKeyValuePairs :: Word64 -> MyGet KVStore
+getKeyValuePairs = inner mempty
+  where
+    inner db i
+        | i == 0 = pure db
+        | otherwise = do
+            (key, (value, timer)) <- getKeyValuePair
+            inner (insertHelper key value timer db) (i - 1)
+
+    insertHelper key value (Just timer) = DB.insertWith key value timer
+    insertHelper key value Nothing = DB.insert key value
 
 getDB :: MyGet Db
 getDB = do
@@ -190,11 +267,13 @@ getDB = do
     unless (RESIZEDB == resizedbFildIndicatorOp) $ E.throwError "Missing Resize DB Indicator Field"
     lenHashTable <- getVariableLenNr
     lenExpireHashTable <- getVariableLenNr
+    kvps <- getKeyValuePairs (lenHashTable + lenExpireHashTable)
     pure
         Db
-            { databaseNr = fromIntegral dbId
-            , store = mempty
-            , expiryStore = mempty
+            { databaseNr = dbId
+            , hashTableSize = lenHashTable
+            , hashExpireTableSize = lenExpireHashTable
+            , store = kvps
             }
 
 getDBs :: MyGet [Db]
@@ -210,15 +289,7 @@ getAuxField :: MyGet (Maybe AuxField)
 getAuxField = do
     auxField <- getOpcode
     unless (AUX == auxField) $ E.throwError "Missing aux field"
-    E.lift skipIt
-  where
-    skipIt = do
-        v <- G.lookAhead G.getWord8
-        if SELECTDB /= parseOpcode v
-            then do
-                _ <- G.getWord8
-                skipIt
-            else pure Nothing
+    skipUntil (\c -> SELECTDB /= parseOpcode c)
 
 checkRedisHeader :: MyGet ()
 checkRedisHeader = do
@@ -257,6 +328,3 @@ readFile filePath = do
         else processHelper <$> BL.readFile filePath
   where
     processHelper = G.runGet (E.runExceptT process)
-
-todo :: a
-todo = error "todo"
