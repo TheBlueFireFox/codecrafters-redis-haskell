@@ -1,11 +1,10 @@
 module Args (Options (..), parseArgs) where
 
 import Control.Arrow (Arrow (first))
-import Data.List
-import Debug.Trace (trace)
 import System.Console.GetOpt
 import System.Environment (getArgs)
 import System.Exit (exitSuccess)
+import Data.List (isPrefixOf)
 
 -- --dir /tmp/redis-files --dbfilename dump.rdb
 data Options = Options

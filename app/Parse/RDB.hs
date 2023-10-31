@@ -9,13 +9,19 @@ module Parse.RDB (
     readFile,
 ) where
 
+import Control.Monad (unless)
+import Data.Int (Int32)
+import Data.Word (Word64, Word8)
+import Prelude hiding (readFile)
+
+import Control.Monad.Except qualified as E
+import Data.Binary.Get qualified as G
 import Data.ByteString.Lazy qualified as BL
 import Data.ByteString.Lazy.Char8 qualified as BLC
-import Data.Int (Int32)
 import Data.Map.Strict qualified as M
-import Data.Word (Word64, Word8)
 import System.Directory qualified as Dir
-import Prelude hiding (readFile)
+
+type MyGet a = E.ExceptT BL.ByteString G.Get a
 
 {-
     00000000  52 45 44 49 53 30 30 31  30 fa 09 72 65 64 69 73  |REDIS0010..redis|
@@ -121,19 +127,24 @@ toValueType v = case v of
     14 -> Just ListZipListEncoding
     _ -> Nothing
 
-checkRedisHeader :: BLC.ByteString -> Maybe BLC.ByteString
-checkRedisHeader file = if "REDIS" == BL.take 5 file
-    then Just $ BL.drop 5 file
-    else Nothing
+checkRedisHeader :: MyGet ()
+checkRedisHeader = do
+    r <- E.lift $ G.getLazyByteString 5
+    unless ("REDIS" == r) $ E.throwError "Missing magic string"
 
-readFile :: FilePath -> IO (Maybe RDB)
+process :: MyGet a
+process = do 
+    checkRedisHeader
+    todo
+
+readFile :: FilePath -> IO (Either BL.ByteString RDB)
 readFile filePath = do
     b <- Dir.doesFileExist filePath
     if not b
-        then pure Nothing
-        else Just . process <$> BL.readFile filePath
+        then pure $ Left "RDB File not found"
+        else processHelper <$> BL.readFile filePath
   where
-    process file 
+    processHelper = G.runGet (E.runExceptT process)
 
 todo :: a
 todo = error "todo"

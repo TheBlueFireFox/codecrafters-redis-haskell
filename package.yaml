@@ -38,7 +38,10 @@ dependencies:
 - parser-combinators
 - parsec
 - attoparsec
+# Custom
+- filepath
 - directory
+- binary
 
 executables:
   hs-redis-clone-exe:
