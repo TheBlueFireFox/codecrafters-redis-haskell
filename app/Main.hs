@@ -24,6 +24,9 @@ run opts db = do
 
     serve port (Process.process (db, opts))
 
+runNoDB :: Args.Options -> IO b
+runNoDB opts = run opts =<< CM.newDB
+
 convertDB :: DB.DB BLC.ByteString BLC.ByteString -> DB.DB RESP.RESPDataTypes RESP.RESPDataTypes
 convertDB = DB.mapDB t t
   where
@@ -34,7 +37,9 @@ rdbHandler opts path = do
     rdb <- RDB.readFile path
     -- putStrLn $ either show show rdb
     case rdb of
-        Left v -> BLC.putStrLn v
+        Left v -> do
+            BLC.putStrLn v
+            runNoDB opts
         Right v -> do
             BLC.putStrLn $ "Loaded Redis DB Version: " <> BLC.pack (show (RDB.rdbVersionNr v))
             let dbRDB = head $ RDB.dbs v -- for now only load db 0
@@ -54,4 +59,4 @@ main = do
         (Just dir, Just path) -> do
             rdbHandler opts $ dir </> path
         -- new in memory database
-        _ -> run opts =<< CM.newDB
+        _ -> runNoDB opts
