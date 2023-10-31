@@ -22,6 +22,7 @@ data Request
     | Set Key Value ExpireTimeMS
     | Get Key
     | ConfigGet [Par.RESPDataTypes]
+    | Keys Par.RESPDataTypes
     deriving (Show)
 
 type Error = Par.RESPDataTypes
@@ -107,6 +108,11 @@ parseConfig (v : vs) = p =<< extractor v
         "GET" -> parseConfigGet vs
         _ -> Left $ handleError "Unknown command"
 
+parseKeys :: [Par.RESPDataTypes] -> Either Error Request
+parseKeys [v@(Par.BulkString _)] = Right $ Keys v
+parseKeys [v@(Par.SimpleString _)] = Right $ Keys v
+parseKeys v = Left $ handleErrorNumArgs (length v) 1
+
 -- * 1\r\n$4\r\nping\r\n
 processCmd :: ([Par.RedisDataTypes], [Par.RESPDataTypes]) -> Either Error Request
 processCmd (red, resp) = case red of
@@ -121,6 +127,7 @@ processCmd (red, resp) = case red of
         "SET" -> handler parseSet
         "GET" -> handler parseGet
         "CONFIG" -> handler parseConfig
+        "KEYS" -> handler parseKeys
         _ -> Left $ handleError "Unknown command"
 
 parse :: (Par.RedisDataTypes, Par.RESPDataTypes) -> Either Error Request

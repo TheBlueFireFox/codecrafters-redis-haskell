@@ -1,4 +1,4 @@
-module ConcurrentMemory (DB, newDB, fromDB, toDB, insert, insertWith, lookup) where
+module ConcurrentMemory (DB, newDB, fromDB, toDB, insert, insertWith, lookup, keys, values) where
 
 import Prelude hiding (lookup)
 
@@ -35,6 +35,16 @@ insertWith key val expMs db = do
     STM.atomically $ do
         m <- TVar.readTVar db
         TVar.writeTVar db $ DB.insertWith key val expNs m
+
+keys :: DB k v -> IO [DB.Key k]
+keys db = do
+    m <- toDB db
+    pure $ map fst $ M.toList m
+
+values :: DB k v -> IO [DB.Value v]
+values db = do
+    m <- toDB db
+    pure $ map snd $ M.toList m
 
 lookup :: (Ord k) => k -> DB k v -> IO (Maybe v)
 lookup key db = do

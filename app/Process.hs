@@ -8,6 +8,7 @@ import Data.ByteString.Lazy qualified as BL
 import Data.Maybe (fromMaybe)
 import Data.Text.Lazy qualified as TL
 import Data.Word (Word64)
+import Parse.RESP (RESPDataTypes)
 import Parse.RESP qualified as RESP
 import Request qualified as Req
 
@@ -69,6 +70,25 @@ handleConfigGet opts payload = either id (RESP.Arrays . concat) $ inner [] paylo
         "DBFILENAME" -> pro x $ Q.optDbPath opts
         _ -> Left $ handleError "Unknown config key"
 
+handleKeys :: DB -> RESPDataTypes -> IO Response
+handleKeys db pattern = do
+    keys <- CM.keys db
+    print keys
+    helper keys pattern
+  where
+    helper keys (RESP.BulkString s) = matcher s keys
+    helper keys (RESP.SimpleString s) = matcher s keys
+    helper _ _ = pure RESP.NullArrays
+
+    compStr (RESP.RString s) (RESP.RString p) = s == p
+    compStr _ _ = False
+
+    matcher s keys =
+        if s == "*"
+            then pure $ RESP.Arrays keys
+            else pure $ RESP.Arrays $ filterMap keys
+    filterMap = map snd . filter (compStr (RESP.fromRESPDataTypes pattern) . fst) . map (\x -> (RESP.fromRESPDataTypes x, x))
+
 handleCommands :: Data -> Request -> IO Response
 handleCommands (db, opts) req = case req of
     Req.Ping payload -> pure $ handlePing payload
@@ -76,6 +96,7 @@ handleCommands (db, opts) req = case req of
     Req.Set key value expiry -> handleSet db key value expiry
     Req.Get key -> handleGet db key
     Req.ConfigGet params -> pure $ handleConfigGet opts params
+    Req.Keys pattern -> handleKeys db pattern
 
 processHelper :: Data -> BL.ByteString -> IO Response
 processHelper d = maybe (pure $ handleError "Unable to parse request") parse . RESP.deserialize
