@@ -248,14 +248,16 @@ getKeyValuePair = do
     value <- getEncodedValue vt
     pure (key, (value, expTime))
 
-getKeyValuePairs :: Word64 -> MyGet KVStore
+getKeyValuePairs :: MyGet KVStore
 getKeyValuePairs = inner mempty
   where
-    inner db i
-        | i == 0 = pure db
-        | otherwise = do
-            (key, (value, timer)) <- getKeyValuePair
-            inner (insertHelper key value timer db) (i - 1)
+    inner db = do
+        op <- E.lift $ G.lookAhead G.getWord8
+        if parseOpcode op == EOF
+            then pure db
+            else do
+                (key, (value, timer)) <- getKeyValuePair
+                inner $ insertHelper key value timer db
 
     insertHelper key value (Just timer) = DB.insertWith key value timer
     insertHelper key value Nothing = DB.insert key value
@@ -267,7 +269,7 @@ getDB = do
     unless (RESIZEDB == resizedbFildIndicatorOp) $ E.throwError "Missing Resize DB Indicator Field"
     lenHashTable <- getVariableLenNr
     lenExpireHashTable <- getVariableLenNr
-    kvps <- getKeyValuePairs (lenHashTable + lenExpireHashTable)
+    kvps <- getKeyValuePairs
     pure
         Db
             { databaseNr = dbId

@@ -42,6 +42,7 @@ dependencies:
 - filepath
 - directory
 - binary
+- hex-text # Allows one to send binary encodes as hex as a bulkstring
 
 executables:
   hs-redis-clone-exe:

@@ -73,26 +73,19 @@ handleConfigGet opts payload = either id (RESP.Arrays . concat) $ inner [] paylo
 handleKeys :: DB -> RESPDataTypes -> IO Response
 handleKeys db pattern = do
     keys <- CM.keys db
-    values <- CM.values db
-    print keys
-    helper keys values pattern
+    helper keys pattern
   where
-    helper keys values (RESP.BulkString s) = matcher s keys values
-    helper keys values (RESP.SimpleString s) = matcher s keys values
-    helper _ _ _ = pure RESP.NullArrays
+    helper keys (RESP.BulkString s) = matcher s keys
+    helper keys (RESP.SimpleString s) = matcher s keys
+    helper _ _ = pure RESP.NullArrays
 
     compStr (RESP.RString s) (RESP.RString p) = s == p
     compStr _ _ = False
 
-    fromBulk (RESP.BulkString s) = s
-    fromBulk (RESP.SimpleString s) = s
-    fromBulk _ = error "Odd Value"
-
-    matcher s keys values =
+    matcher s keys =
         if s == "*"
-            then pure $ if length keys == 1 && head keys == RESP.BulkString "ERROR" then RESP.SimpleError (fromBulk (head values)) else RESP.Arrays keys
-            else pure $ RESP.SimpleError "Pattern Match Not supported"
-
+            then pure $ RESP.Arrays keys
+            else pure $ RESP.Arrays $ filterMap keys
     filterMap = map snd . filter (compStr (RESP.fromRESPDataTypes pattern) . fst) . map (\x -> (RESP.fromRESPDataTypes x, x))
 
 handleCommands :: Data -> Request -> IO Response

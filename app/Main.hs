@@ -11,7 +11,9 @@ import Parse.RDB qualified as RDB
 import Parse.RESP qualified as RESP
 import Process qualified
 import Server (serve)
+import System.Directory qualified as Dir
 import System.FilePath ((</>))
+import Text.Hex (LazyByteString, lazilyEncodeHex)
 
 run :: Args.Options -> Process.DB -> IO b
 run opts db = do
@@ -32,16 +34,26 @@ convertDB = DB.mapDB t t
   where
     t = RESP.BulkString . TL.decodeUtf8
 
+-- convertDB2 :: DB.DB BLC.ByteString LazyByteString -> DB.DB RESP.RESPDataTypes RESP.RESPDataTypes
+-- convertDB2 = DB.mapDB t tt
+--   where
+--     t = RESP.BulkString . TL.decodeUtf8
+--     tt = RESP.BulkString . lazilyEncodeHex
+
 rdbHandler :: Args.Options -> FilePath -> IO ()
 rdbHandler opts path = do
     rdb <- RDB.readFile path
     -- putStrLn $ either show show rdb
     case rdb of
         Left v -> do
+            -- if we are here we know that we had an issue with parsing :(
             BLC.putStrLn v
-            let d = DB.insert "ERROR" v mempty
-            db <- CM.fromDB $ convertDB d
-            run opts db
+            -- allow a hack to get any information about the parsing error
+            -- fileContent <- BLC.readFile path
+            -- let d = DB.insert "ERROR" fileContent mempty
+            -- db <- CM.fromDB $ convertDB2 d
+            -- run opts db
+            runNoDB opts
         Right v -> do
             BLC.putStrLn $ "Loaded Redis DB Version: " <> BLC.pack (show (RDB.rdbVersionNr v))
             let dbRDB = head $ RDB.dbs v -- for now only load db 0
@@ -59,6 +71,10 @@ main = do
     case (Args.optDir opts, Args.optDbPath opts) of
         -- rdb based in memory database
         (Just dir, Just path) -> do
-            rdbHandler opts $ dir </> path
+            let filePath = dir </> path
+            b <- Dir.doesFileExist filePath
+            if not b
+                then runNoDB opts
+                else rdbHandler opts filePath
         -- new in memory database
         _ -> runNoDB opts
