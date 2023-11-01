@@ -85,8 +85,9 @@ handleKeys db pattern = do
 
     matcher s keys =
         if s == "*"
-            then pure $ RESP.Arrays keys
-            else pure $ RESP.Arrays $ filterMap keys
+            then pure $ if null keys then RESP.SimpleError "No keys"  else RESP.Arrays keys
+            else pure $ RESP.SimpleError "Pattern Match Not supported"
+
     filterMap = map snd . filter (compStr (RESP.fromRESPDataTypes pattern) . fst) . map (\x -> (RESP.fromRESPDataTypes x, x))
 
 handleCommands :: Data -> Request -> IO Response
