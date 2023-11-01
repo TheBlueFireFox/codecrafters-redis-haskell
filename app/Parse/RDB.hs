@@ -153,13 +153,13 @@ getWord8 :: MyGet Word8
 getWord8 = E.lift G.getWord8
 
 getWord16 :: MyGet Word16
-getWord16 = E.lift G.getWord16be
+getWord16 = E.lift G.getWord16le
 
 getWord32 :: MyGet Word32
-getWord32 = E.lift G.getWord32be
+getWord32 = E.lift G.getWord32le
 
 getWord64 :: MyGet Word64
-getWord64 = E.lift G.getWord64be
+getWord64 = E.lift G.getWord64le
 
 getByteString :: Int64 -> MyGet BL.ByteString
 getByteString = E.lift . G.getLazyByteString
@@ -232,9 +232,11 @@ getExpiryTime = do
     expLimit <- E.lift $ G.lookAhead G.getWord8
     case expLimit of
         0xFD -> do
+            -- seconds
             _ <- getWord8
-            Just . fromIntegral <$> getWord32
+            Just . (* 1000) . fromIntegral <$> getWord32
         0xFC -> do
+            -- milliseconds
             _ <- getWord8
             Just <$> getWord64
         _ -> pure Nothing

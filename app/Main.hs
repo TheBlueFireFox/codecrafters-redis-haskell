@@ -60,7 +60,7 @@ rdbHandler opts path = do
             BLC.putStrLn $ "Expire table size: " <> BLC.pack (show (RDB.hashExpireTableSize dbRDB))
 
             let store = RDB.store dbRDB
-
+            print store
             -- fileContent <- BLC.readFile path
             -- let s = DB.insert "ERROR" fileContent store
             -- db <- CM.fromDB $ convertDB s

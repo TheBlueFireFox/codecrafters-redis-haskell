@@ -5,11 +5,10 @@ import Prelude hiding (lookup)
 import Control.Concurrent.STM qualified as STM
 import Control.Concurrent.STM.TVar qualified as TVar
 import Data.Map.Strict qualified as M
-import Data.Time qualified as T
-import Data.Time.Clock.POSIX qualified as TP
 import Data.Word (Word64)
 
 import DB.DB qualified as DB
+import Data.Time.Clock.POSIX qualified as T
 
 type DB k v = TVar.TVar (DB.DB k v)
 
@@ -30,11 +29,10 @@ insert key val db = STM.atomically $ do
 insertWith :: (Ord k) => k -> v -> DB.Until -> DB k v -> IO ()
 insertWith key val expMs db = do
     t <- getTimeStamp
-    let tNs = expMs * 1000000
-    let expNs = t + tNs
+    let resExpMs = t + expMs
     STM.atomically $ do
         m <- TVar.readTVar db
-        TVar.writeTVar db $ DB.insertWith key val expNs m
+        TVar.writeTVar db $ DB.insertWith key val resExpMs m
 
 keys :: DB k v -> IO [DB.Key k]
 keys db = do
@@ -58,8 +56,6 @@ lookup key db = do
                 _ <- STM.writeTVar db newM
                 pure res
 
--- returns in NS
+-- returns in MS
 getTimeStamp :: IO Word64
-getTimeStamp = h <$> T.getCurrentTime
-  where
-    h = floor . (1e9 *) . T.nominalDiffTimeToSeconds . TP.utcTimeToPOSIXSeconds
+getTimeStamp = round . (* 1000) <$> T.getPOSIXTime

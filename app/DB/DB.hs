@@ -23,9 +23,9 @@ insert key val db =
         M.insert key value db
 
 insertWith :: (Ord k) => k -> p -> Word64 -> M.Map k (Value p) -> M.Map k (Value p)
-insertWith key val untilNs db =
+insertWith key val untilMs db =
     let
-        value = Value{payload = val, timer = Just untilNs}
+        value = Value{payload = val, timer = Just untilMs}
      in
         M.insert key value db
 
