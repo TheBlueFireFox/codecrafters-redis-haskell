@@ -3,7 +3,7 @@
 module Main (main) where
 
 import Args qualified
-import ConcurrentMemory qualified as CM
+import DB.ConcurrentMemory qualified as CM
 import DB.DB qualified as DB
 import Data.ByteString.Lazy.Char8 qualified as BLC
 import Parse.RDB qualified as RDB

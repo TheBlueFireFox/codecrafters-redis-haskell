@@ -1,4 +1,4 @@
-module ConcurrentMemory (DB, newDB, fromDB, toDB, insert, insertWith, lookup, keys, values) where
+module DB.ConcurrentMemory (DB, newDB, fromDB, toDB, insert, insertWith, lookup, keys, values) where
 
 import Prelude hiding (lookup)
 

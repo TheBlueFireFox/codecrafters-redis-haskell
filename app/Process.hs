@@ -7,7 +7,7 @@ import Data.Word (Word64)
 import Parse.RESP (RESPDataTypes)
 
 import Args qualified as Q
-import ConcurrentMemory qualified as CM
+import DB.ConcurrentMemory qualified as CM
 import Data.ByteString.Lazy qualified as BL
 import Data.ByteString.Lazy.Char8 qualified as BLC
 import Data.Text.Lazy qualified as TL
