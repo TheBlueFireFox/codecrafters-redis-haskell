@@ -39,12 +39,12 @@ insertWith key val expMs db = do
 keys :: DB k v -> IO [DB.Key k]
 keys db = do
     m <- toDB db
-    pure $ map fst $ M.toList m
+    pure $ DB.keys m
 
-values :: DB k v -> IO [DB.Value v]
+values :: DB k v -> IO [v]
 values db = do
     m <- toDB db
-    pure $ map snd $ M.toList m
+    pure $ DB.values m
 
 lookup :: (Ord k) => k -> DB k v -> IO (Maybe v)
 lookup key db = do

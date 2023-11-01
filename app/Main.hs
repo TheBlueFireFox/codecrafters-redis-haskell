@@ -39,7 +39,9 @@ rdbHandler opts path = do
     case rdb of
         Left v -> do
             BLC.putStrLn v
-            runNoDB opts
+            let d = DB.insert "ERROR" v mempty
+            db <- CM.fromDB $ convertDB d
+            run opts db
         Right v -> do
             BLC.putStrLn $ "Loaded Redis DB Version: " <> BLC.pack (show (RDB.rdbVersionNr v))
             let dbRDB = head $ RDB.dbs v -- for now only load db 0

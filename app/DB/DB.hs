@@ -1,4 +1,4 @@
-module DB.DB (Until, Key, Value (..), DB, insert, insertWith, lookup, mapDB) where
+module DB.DB (Until, Key, Value (..), DB, insert, insertWith, lookup, mapDB, keys, values) where
 
 import Prelude hiding (lookup)
 
@@ -45,3 +45,9 @@ mapDB fk fv = M.fromList . inner . M.toList
   where
     inner = map (bimap fk mValue)
     mValue Value{payload, timer} = Value{payload = fv payload, timer}
+
+keys :: M.Map b1 b2 -> [b1]
+keys = map fst . M.toList
+
+values :: M.Map a (Value b) -> [b]
+values = map (payload . snd) . M.toList
