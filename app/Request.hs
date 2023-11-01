@@ -7,6 +7,7 @@ import Text.Printf (printf)
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Builder qualified as TLB
 import Data.Text.Lazy.Read qualified as TR
+import Data.Text.Lazy.Encoding qualified as TE
 
 import Control.Arrow (left, right)
 import Data.Word (Word64)
@@ -58,7 +59,7 @@ parseEcho payload = case payload of
 
 extractor :: Par.RESPDataTypes -> Either Error TL.Text
 extractor p = case p of
-    Par.BulkString v -> Right v
+    Par.BulkString v -> Right $ TE.decodeUtf8 v
     Par.SimpleString v -> Right v
     _ -> Left $ handleError "Incorrect Type"
 

@@ -25,7 +25,7 @@ fromRESPDataTypes dt = case dt of
     SimpleError e -> RError e
     SimpleString v -> RString v
     Integers v -> RInteger v
-    BulkString v -> RString v
+    BulkString v -> RString $ TE.decodeUtf8 v
     Arrays x -> RArray $ map fromRESPDataTypes x
     NullArrays -> RNull
     NullString -> RNull
@@ -42,7 +42,7 @@ fromRESPDataTypes dt = case dt of
 data RESPDataTypes
     = SimpleError TL.Text
     | SimpleString TL.Text
-    | BulkString TL.Text
+    | BulkString BL.ByteString
     | NullString
     | Integers Int64
     | Arrays [RESPDataTypes]
@@ -84,8 +84,7 @@ parseBulkString res = do
     process size justStr = do
         let (str, restWithSep) = BL.splitAt size justStr
         noSep <- parseSeparator restWithSep
-        let endStr = TE.decodeUtf8 str
-        pure (BulkString endStr, noSep)
+        pure (BulkString str, noSep)
 
 {-
  -  *2\r\n$5\r\nhello\r\n$5\r\nworld\r\n
@@ -146,7 +145,7 @@ serialize input = case input of
     SimpleString v -> "+" <> enc v <> sep
     SimpleError v -> "-" <> enc v <> sep
     Integers v -> ":" <> int v <> sep
-    BulkString v -> "$" <> int (TL.length v) <> sep <> enc v <> sep
+    BulkString v -> "$" <> int (BL.length v) <> sep <> v <> sep
     Arrays v -> "*" <> int (toEnum (length v)) <> sep <> mconcat (map serialize v)
     NullArrays -> "$-1" <> sep
     NullString -> "$-1" <> sep

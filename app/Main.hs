@@ -6,14 +6,12 @@ import Args qualified
 import ConcurrentMemory qualified as CM
 import DB.DB qualified as DB
 import Data.ByteString.Lazy.Char8 qualified as BLC
-import Data.Text.Lazy.Encoding qualified as TL
 import Parse.RDB qualified as RDB
 import Parse.RESP qualified as RESP
 import Process qualified
 import Server (serve)
 import System.Directory qualified as Dir
 import System.FilePath ((</>))
-import Text.Hex (LazyByteString, lazilyEncodeHex)
 
 run :: Args.Options -> Process.DB -> IO b
 run opts db = do
@@ -32,7 +30,7 @@ runNoDB opts = run opts =<< CM.newDB
 convertDB :: DB.DB BLC.ByteString BLC.ByteString -> DB.DB RESP.RESPDataTypes RESP.RESPDataTypes
 convertDB = DB.mapDB t t
   where
-    t = RESP.BulkString . TL.decodeUtf8
+    t = RESP.BulkString
 
 -- convertDB2 :: DB.DB BLC.ByteString LazyByteString -> DB.DB RESP.RESPDataTypes RESP.RESPDataTypes
 -- convertDB2 = DB.mapDB t tt
@@ -60,7 +58,13 @@ rdbHandler opts path = do
             BLC.putStrLn $ "Loaded DB : " <> BLC.pack (show (RDB.databaseNr dbRDB))
             BLC.putStrLn $ "Hash table size: " <> BLC.pack (show (RDB.hashTableSize dbRDB))
             BLC.putStrLn $ "Expire table size: " <> BLC.pack (show (RDB.hashExpireTableSize dbRDB))
+
             let store = RDB.store dbRDB
+
+            -- fileContent <- BLC.readFile path
+            -- let s = DB.insert "ERROR" fileContent store
+            -- db <- CM.fromDB $ convertDB s
+
             db <- CM.fromDB $ convertDB store
             run opts db
 

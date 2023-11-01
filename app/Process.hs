@@ -2,15 +2,19 @@
 
 module Process (process, DB) where
 
+import Data.Maybe (fromMaybe)
+import Data.Word (Word64)
+import Parse.RESP (RESPDataTypes)
+
 import Args qualified as Q
 import ConcurrentMemory qualified as CM
 import Data.ByteString.Lazy qualified as BL
-import Data.Maybe (fromMaybe)
+import Data.ByteString.Lazy.Char8 qualified as BLC
 import Data.Text.Lazy qualified as TL
-import Data.Word (Word64)
-import Parse.RESP (RESPDataTypes)
+import Data.Text.Lazy.Encoding qualified as TE
 import Parse.RESP qualified as RESP
 import Request qualified as Req
+import Text.Hex qualified as TH
 
 type Data = (DB, Q.Options)
 
@@ -53,7 +57,7 @@ handleGet db key = do
 
 extractor :: RESP.RESPDataTypes -> Either Response TL.Text
 extractor p = case p of
-    RESP.BulkString v -> Right v
+    RESP.BulkString v -> Right $ TE.decodeUtf8 v
     RESP.SimpleString v -> Right v
     _ -> Left $ handleError "Incorrect Type"
 
@@ -64,10 +68,10 @@ handleConfigGet opts payload = either id (RESP.Arrays . concat) $ inner [] paylo
     inner acc (x : xs) = flip inner xs . (: acc) =<< p =<< extractor x
 
     str = RESP.BulkString
-    pro x = Right . maybe [RESP.NullString] (\y -> [str x, str (TL.pack y)])
+    pro x = Right . maybe [RESP.NullString] (\y -> [str x, str (BLC.pack y)])
     p x = case TL.toUpper x of
-        "DIR" -> pro x $ Q.optDir opts
-        "DBFILENAME" -> pro x $ Q.optDbPath opts
+        "DIR" -> pro (TE.encodeUtf8 x) $ Q.optDir opts
+        "DBFILENAME" -> pro (TE.encodeUtf8 x) $ Q.optDbPath opts
         _ -> Left $ handleError "Unknown config key"
 
 handleKeys :: DB -> RESPDataTypes -> IO Response
@@ -76,17 +80,24 @@ handleKeys db pattern = do
     helper keys pattern
   where
     helper keys (RESP.BulkString s) = matcher s keys
-    helper keys (RESP.SimpleString s) = matcher s keys
+    helper keys (RESP.SimpleString s) = matcher (TE.encodeUtf8 s) keys
     helper _ _ = pure RESP.NullArrays
 
     compStr (RESP.RString s) (RESP.RString p) = s == p
     compStr _ _ = False
 
-    matcher s keys =
-        if s == "*"
-            then pure $ RESP.Arrays keys
-            else pure $ RESP.Arrays $ filterMap keys
     filterMap = map snd . filter (compStr (RESP.fromRESPDataTypes pattern) . fst) . map (\x -> (RESP.fromRESPDataTypes x, x))
+
+    errorHelper (RESP.BulkString s) = TH.lazilyEncodeHex s
+    errorHelper _ = error "Invalid DB format"
+
+    matcher s keys =
+        case s of
+            "*" -> pure $ RESP.Arrays keys
+            "ERROR" -> do
+                m <- CM.lookup (RESP.BulkString s) db
+                pure $ RESP.SimpleError $ maybe (TL.pack "Not Found") errorHelper m
+            _ -> pure $ RESP.Arrays $ filterMap keys
 
 handleCommands :: Data -> Request -> IO Response
 handleCommands (db, opts) req = case req of
