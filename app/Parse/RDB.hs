@@ -12,6 +12,7 @@ import Control.Monad.Except qualified as E
 import Data.Binary.Get qualified as G
 import Data.ByteString.Lazy qualified as BL
 import Data.ByteString.Lazy.Char8 qualified as BLC
+import Data.Map.Strict qualified as M
 import System.Directory qualified as Dir
 
 import DB.DB qualified as DB
@@ -76,10 +77,10 @@ data RDB = RDB
     deriving (Show)
 
 data AuxField = AuxField
-    { redisVersion :: BL.ByteString
-    , redisBits :: BL.ByteString
-    , ctime :: BL.ByteString
-    , usedMem :: BL.ByteString
+    { redisVersion :: Maybe BL.ByteString
+    , redisBits :: Maybe BL.ByteString
+    , ctime :: Maybe BL.ByteString
+    , usedMem :: Maybe BL.ByteString
     }
     deriving (Show)
 
@@ -127,24 +128,27 @@ toValueType v = case v of
     _ -> Nothing
 
 data OpCodes
-    = EOF
-    | SELECTDB
-    | EXPIRETIME
-    | EXPIRETIMEMS
-    | RESIZEDB
-    | AUX
-    | NONE
+    = Eof
+    | SelectDB
+    | ExpireTimeS
+    | ExpireTimeMs
+    | ResizeDB
+    | Aux
+    | None
     deriving (Show, Eq, Enum)
 
 parseOpcode :: (Eq a, Num a) => a -> OpCodes
 parseOpcode opCode = case opCode of
-    0xFF -> EOF
-    0xFE -> SELECTDB
-    0xFD -> EXPIRETIME
-    0xFC -> EXPIRETIMEMS
-    0xFB -> RESIZEDB
-    0xFA -> AUX
-    _ -> NONE
+    0xFF -> Eof
+    0xFE -> SelectDB
+    0xFD -> ExpireTimeS
+    0xFC -> ExpireTimeMs
+    0xFB -> ResizeDB
+    0xFA -> Aux
+    _ -> None
+
+lookAheadOpcode :: MyGet OpCodes
+lookAheadOpcode = E.lift $ parseOpcode <$> G.lookAhead G.getWord8
 
 getOpcode :: MyGet OpCodes
 getOpcode = parseOpcode <$> getWord8
@@ -163,15 +167,6 @@ getWord64 = E.lift G.getWord64le
 
 getByteString :: Int64 -> MyGet BL.ByteString
 getByteString = E.lift . G.getLazyByteString
-
-skipUntil :: (Monad (t G.Get), E.MonadTrans t) => (Word8 -> Bool) -> t G.Get (Maybe a)
-skipUntil f = do
-    v <- E.lift $ G.lookAhead G.getWord8
-    if f v
-        then do
-            _ <- E.lift G.getWord8
-            skipUntil f
-        else pure Nothing
 
 {-
     Bits 	How to parse
@@ -219,7 +214,7 @@ getStringEncodedValue = do
     len <- getStrVariableLenNr
     case len of
         LenPrefixStr l -> getStringLenEncodedValue l
-        IntAsStr l -> getByteString l
+        IntAsStr l -> pure $ BLC.pack $ show l
         CompStr _cl _dl -> E.throwError "No compressed string support currently"
 
 getEncodedValue :: ValueTypes -> MyGet BLC.ByteString
@@ -254,10 +249,10 @@ getKeyValuePairs :: MyGet KVStore
 getKeyValuePairs = inner mempty
   where
     inner db = do
-        op <- E.lift $ G.lookAhead G.getWord8
-        if parseOpcode op == EOF
-            then pure db
-            else do
+        op <- lookAheadOpcode
+        case op of
+            Eof -> pure db
+            _ -> do
                 (key, (value, timer)) <- getKeyValuePair
                 inner $ insertHelper key value timer db
 
@@ -268,7 +263,7 @@ getDB :: MyGet Db
 getDB = do
     dbId <- getVariableLenNr
     resizedbFildIndicatorOp <- getOpcode
-    unless (RESIZEDB == resizedbFildIndicatorOp) $ E.throwError "Missing Resize DB Indicator Field"
+    unless (ResizeDB == resizedbFildIndicatorOp) $ E.throwError "Missing Resize DB Indicator Field"
     lenHashTable <- getVariableLenNr
     lenExpireHashTable <- getVariableLenNr
     kvps <- getKeyValuePairs
@@ -284,16 +279,44 @@ getDBs :: MyGet [Db]
 getDBs = inner []
   where
     dbHelper acc dbSelOp = case dbSelOp of
-        SELECTDB -> (inner . (: acc)) =<< getDB
-        EOF -> pure $ reverse acc
+        SelectDB -> (inner . (: acc)) =<< getDB
+        Eof -> pure $ reverse acc
         _ -> E.throwError $ "unexpected database database selector <" <> BLC.pack (show (fromEnum dbSelOp)) <> ">"
     inner acc = dbHelper acc =<< getOpcode
 
-getAuxField :: MyGet (Maybe AuxField)
-getAuxField = do
-    auxField <- getOpcode
-    unless (AUX == auxField) $ E.throwError "Missing aux field"
-    skipUntil (\c -> SELECTDB /= parseOpcode c)
+getAuxField :: MyGet (M.Map BLC.ByteString BLC.ByteString)
+getAuxField = inner mempty
+  where
+    inner m = do
+        op <- lookAheadOpcode
+        if op /= Aux
+            then pure m
+            else getField m
+
+    getField m = do
+        _ <- getOpcode
+        key <- getStringEncodedValue
+        value <- getStringEncodedValue
+        inner (M.insert key value m)
+
+getAuxFields :: MyGet (Maybe AuxField)
+getAuxFields = do
+    m <- getAuxField
+    let rVer = M.lookup "redis-ver" m
+        rBits = M.lookup "redis-bits" m
+        rCTime = M.lookup "ctime" m
+        rUsedMem = M.lookup "used-mem" m
+        af =
+            AuxField
+                { redisVersion = rVer
+                , redisBits = rBits
+                , ctime = rCTime
+                , usedMem = rUsedMem
+                }
+
+    if null rVer && null rBits && null rCTime && null rUsedMem
+        then pure Nothing
+        else pure $ Just af
 
 checkRedisHeader :: MyGet ()
 checkRedisHeader = do
@@ -313,7 +336,7 @@ process :: MyGet RDB
 process = do
     checkRedisHeader
     version <- getRedisVersionNr
-    auxField <- getAuxField
+    auxField <- getAuxFields
     dbs <- getDBs
     checkSum <- getChecksum
     pure

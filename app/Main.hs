@@ -32,12 +32,6 @@ convertDB = DB.mapDB t t
   where
     t = RESP.BulkString
 
--- convertDB2 :: DB.DB BLC.ByteString LazyByteString -> DB.DB RESP.RESPDataTypes RESP.RESPDataTypes
--- convertDB2 = DB.mapDB t tt
---   where
---     t = RESP.BulkString . TL.decodeUtf8
---     tt = RESP.BulkString . lazilyEncodeHex
-
 rdbHandler :: Args.Options -> FilePath -> IO ()
 rdbHandler opts path = do
     rdb <- RDB.readFile path
@@ -46,11 +40,6 @@ rdbHandler opts path = do
         Left v -> do
             -- if we are here we know that we had an issue with parsing :(
             BLC.putStrLn v
-            -- allow a hack to get any information about the parsing error
-            -- fileContent <- BLC.readFile path
-            -- let d = DB.insert "ERROR" fileContent mempty
-            -- db <- CM.fromDB $ convertDB2 d
-            -- run opts db
             runNoDB opts
         Right v -> do
             BLC.putStrLn $ "Loaded Redis DB Version: " <> BLC.pack (show (RDB.rdbVersionNr v))
@@ -58,13 +47,10 @@ rdbHandler opts path = do
             BLC.putStrLn $ "Loaded DB : " <> BLC.pack (show (RDB.databaseNr dbRDB))
             BLC.putStrLn $ "Hash table size: " <> BLC.pack (show (RDB.hashTableSize dbRDB))
             BLC.putStrLn $ "Expire table size: " <> BLC.pack (show (RDB.hashExpireTableSize dbRDB))
+            
+            print $ RDB.auxField v
 
             let store = RDB.store dbRDB
-            print store
-            -- fileContent <- BLC.readFile path
-            -- let s = DB.insert "ERROR" fileContent store
-            -- db <- CM.fromDB $ convertDB s
-
             db <- CM.fromDB $ convertDB store
             run opts db
 
